@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import Parser from "rss-parser";
-import { supabase } from "@/lib/supabase";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
 import { scrapeArticle } from "@/lib/scraper";
-import { summarizeArticle } from "@/lib/gemini";
+import { summarizeArticle } from "@/lib/openai";
 
 const RSS_FEEDS = [
   { source: "Economic Times", url: "https://economictimes.indiatimes.com/markets/rssfeeds/2146842.cms" },
@@ -14,7 +14,7 @@ const RSS_FEEDS = [
 ];
 
 const parser = new Parser();
-const MAX_ARTICLES_PER_RUN = 5;
+const MAX_ARTICLES_PER_RUN = 10;
 
 // Next.js Route configs
 export const maxDuration = 300; // max 5 min timeout for free tier
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
           // 5. Insert into Supabase
           // Bypassing RLS by using the service role key or since we didn't specify, maybe NEXT_PUBLIC_SUPABASE_ANON_KEY works 
           // wait, RLS blocks inserts without auth. Need to handle RLS
-          const { error: insertError } = await supabase
+          const { error: insertError } = await supabaseAdmin
             .from("articles")
             .insert([
               {
