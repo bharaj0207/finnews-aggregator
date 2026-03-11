@@ -31,69 +31,76 @@ export async function POST(request: Request) {
     let processedCount = 0;
     const results = [];
 
-    // 2. Iterate through RSS feeds
-    for (const feed of RSS_FEEDS) {
-      if (processedCount >= MAX_ARTICLES_PER_RUN) break;
-
+    // 2. Fetch and parse all feeds concurrently
+    const feedPromises = RSS_FEEDS.map(async (feed) => {
       try {
         const feedData = await parser.parseURL(feed.url);
-        
-        for (const item of feedData.items) {
-          if (processedCount >= MAX_ARTICLES_PER_RUN) break;
-
-          const articleUrl = item.link;
-          const title = item.title;
-
-          if (!articleUrl || !title) continue;
-
-          // 3. Check if article already exists in DB
-          const { data: existingArticle } = await supabase
-            .from("articles")
-            .select("id")
-            .eq("original_url", articleUrl)
-            .single();
-
-          if (existingArticle) continue; // Skip if already processed
-
-          // 4. New Article: Scrape Date, Image and summarize
-          console.log(`Processing article: ${title}`);
-          const { text, imageUrl } = await scrapeArticle(articleUrl);
-
-          if (!text || text.length < 100) {
-              console.log("Not enough text to summarize, skipping.");
-              continue; // Content too short
-          }
-
-          const summary = await summarizeArticle(text);
-
-          // 5. Insert into Supabase
-          // Bypassing RLS by using the service role key or since we didn't specify, maybe NEXT_PUBLIC_SUPABASE_ANON_KEY works 
-          // wait, RLS blocks inserts without auth. Need to handle RLS
-          const { error: insertError } = await supabaseAdmin
-            .from("articles")
-            .insert([
-              {
-                title,
-                summary,
-                original_url: articleUrl,
-                image_url: imageUrl,
-                source: feed.source,
-                published_at: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString()
-              }
-            ]);
-
-          if (insertError) {
-             console.error("Supabase insert error:", insertError);
-             throw insertError;
-          }
-
-          results.push({ title, url: articleUrl });
-          processedCount++;
-        }
-      } catch (feedError) {
-        console.error(`Error processing feed ${feed.url}:`, feedError);
-        // Continue to the next feed
+        return feedData.items.map(item => ({ ...item, source: feed.source }));
+      } catch (error) {
+        console.error(`Error processing feed ${feed.url}:`, error);
+        return [];
       }
+    });
+
+    const nestedItems = await Promise.all(feedPromises);
+    
+    // 3. Flatten and sort all items by date descending (newest first)
+    const allItems = nestedItems.flat().sort((a, b) => {
+      const dateA = a.pubDate ? new Date(a.pubDate).getTime() : 0;
+      const dateB = b.pubDate ? new Date(b.pubDate).getTime() : 0;
+      return dateB - dateA; // Descending
+    });
+
+    // 4. Process the newest articles until we reach MAX_ARTICLES_PER_RUN
+    for (const item of allItems) {
+      if (processedCount >= MAX_ARTICLES_PER_RUN) break;
+
+      const articleUrl = item.link;
+      const title = item.title;
+
+      if (!articleUrl || !title) continue;
+
+      // 5. Check if article already exists in DB
+      const { data: existingArticle } = await supabase
+        .from("articles")
+        .select("id")
+        .eq("original_url", articleUrl)
+        .single();
+
+      if (existingArticle) continue; // Skip if already processed
+
+      // 6. New Article: Scrape Date, Image and summarize
+      console.log(`Processing article: ${title}`);
+      const { text, imageUrl } = await scrapeArticle(articleUrl);
+
+      if (!text || text.length < 100) {
+          console.log("Not enough text to summarize, skipping.");
+          continue; // Content too short
+      }
+
+      const summary = await summarizeArticle(text);
+
+      // 7. Insert into Supabase
+      const { error: insertError } = await supabaseAdmin
+        .from("articles")
+        .insert([
+          {
+            title,
+            summary,
+            original_url: articleUrl,
+            image_url: imageUrl,
+            source: item.source,
+            published_at: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString()
+          }
+        ]);
+
+      if (insertError) {
+         console.error("Supabase insert error:", insertError);
+         continue; // Attempt to continue with next article instead of failing whole cron
+      }
+
+      results.push({ title, url: articleUrl });
+      processedCount++;
     }
 
     return NextResponse.json({
