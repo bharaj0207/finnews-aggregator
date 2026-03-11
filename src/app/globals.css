@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #0a0a0a;
+  --color-foreground: #ededed;
+  
+  --color-primary: #3b82f6;
+  --color-primary-dark: #2563eb;
+  --color-card: #171717;
+  --color-card-border: #262626;
+  --color-muted: #a3a3a3;
+  --color-green: #22c55e;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    @apply antialiased font-sans;
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    @apply bg-card border border-card-border shadow-lg backdrop-blur-sm rounded-xl transition-all duration-300;
+  }
+  .glass-card:hover {
+    @apply border-primary/50 shadow-primary/20 transform -translate-y-1;
+  }
+}
