@@ -14,7 +14,7 @@ const RSS_FEEDS = [
 ];
 
 const parser = new Parser();
-const MAX_ARTICLES_PER_RUN = 10;
+const MAX_ARTICLES_PER_RUN = 15;
 
 // Next.js Route configs
 export const maxDuration = 300; // max 5 min timeout for free tier
