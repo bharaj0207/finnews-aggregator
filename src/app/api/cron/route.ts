@@ -43,16 +43,28 @@ export async function POST(request: Request) {
     });
 
     const nestedItems = await Promise.all(feedPromises);
-    
-    // 3. Flatten and sort all items by date descending (newest first)
-    const allItems = nestedItems.flat().sort((a, b) => {
-      const dateA = a.pubDate ? new Date(a.pubDate).getTime() : 0;
-      const dateB = b.pubDate ? new Date(b.pubDate).getTime() : 0;
-      return dateB - dateA; // Descending
-    });
+    // 3. Sort items within each feed by date descending
+    const sortedFeeds = nestedItems.map(feedItems => 
+      feedItems.sort((a, b) => {
+        const dateA = a.pubDate ? new Date(a.pubDate).getTime() : 0;
+        const dateB = b.pubDate ? new Date(b.pubDate).getTime() : 0;
+        return dateB - dateA; // Descending
+      })
+    );
 
-    // 4. Process the newest articles until we reach MAX_ARTICLES_PER_RUN
-    for (const item of allItems) {
+    // 4. Interleave items for round-robin balancing across all sources
+    const interleavedItems = [];
+    let maxLen = Math.max(0, ...sortedFeeds.map(f => f.length));
+    for (let i = 0; i < maxLen; i++) {
+      for (const feed of sortedFeeds) {
+        if (i < feed.length) {
+          interleavedItems.push(feed[i]);
+        }
+      }
+    }
+
+    // 5. Process the newest round-robin articles until we reach MAX_ARTICLES_PER_RUN
+    for (const item of interleavedItems) {
       if (processedCount >= MAX_ARTICLES_PER_RUN) break;
 
       const articleUrl = item.link;
@@ -69,34 +81,39 @@ export async function POST(request: Request) {
 
       if (existingArticle) continue; // Skip if already processed
 
-      // 6. New Article: Scrape Date, Image and summarize
-      console.log(`Processing article: ${title}`);
-      const { text, imageUrl } = await scrapeArticle(articleUrl);
+      try {
+        // 6. New Article: Scrape Date, Image and summarize
+        console.log(`Processing article: ${title}`);
+        const { text, imageUrl } = await scrapeArticle(articleUrl);
 
-      if (!text || text.length < 100) {
-          console.log("Not enough text to summarize, skipping.");
-          continue; // Content too short
-      }
+        if (!text || text.length < 100) {
+            console.log("Not enough text to summarize, skipping.");
+            continue; // Content too short
+        }
 
-      const summary = await summarizeArticle(text);
+        const summary = await summarizeArticle(text);
 
-      // 7. Insert into Supabase
-      const { error: insertError } = await supabaseAdmin
-        .from("articles")
-        .insert([
-          {
-            title,
-            summary,
-            original_url: articleUrl,
-            image_url: imageUrl,
-            source: item.source,
-            published_at: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString()
-          }
-        ]);
+        // 7. Insert into Supabase
+        const { error: insertError } = await supabaseAdmin
+          .from("articles")
+          .insert([
+            {
+              title,
+              summary,
+              original_url: articleUrl,
+              image_url: imageUrl,
+              source: item.source,
+              published_at: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString()
+            }
+          ]);
 
-      if (insertError) {
-         console.error("Supabase insert error:", insertError);
-         continue; // Attempt to continue with next article instead of failing whole cron
+        if (insertError) {
+           console.error("Supabase insert error:", insertError);
+           continue; // Attempt to continue with next article instead of failing whole cron
+        }
+      } catch (articleError) {
+        console.error(`Error processing individual article ${articleUrl}:`, articleError);
+        continue; // Skip this one and move to the next
       }
 
       results.push({ title, url: articleUrl });
