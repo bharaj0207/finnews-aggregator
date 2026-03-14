@@ -35,7 +35,7 @@ export default async function ArticlePage(props: { params: Promise<{ id: string 
             <Calendar className="w-4 h-4 mr-2" />
             <time dateTime={article.published_at}>
               {new Date(article.published_at).toLocaleDateString("en-US", {
-                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata'
               })}
             </time>
           </div>

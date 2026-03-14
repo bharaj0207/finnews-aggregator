@@ -53,7 +53,8 @@ export default async function Home() {
                     month: "short",
                     day: "numeric",
                     hour: "numeric",
-                    minute: "2-digit"
+                    minute: "2-digit",
+                    timeZone: "Asia/Kolkata"
                   })}
                 </time>
               </div>
